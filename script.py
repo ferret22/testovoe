@@ -227,8 +227,14 @@ async def add_city(payload: AddCityIn):
     query = "SELECT name, lat, lon FROM cities WHERE name = ?;"
     city = await db_fetchone(query, (payload.name,))
     return CityOut(name=city["name"], lat=city["lat"], lon=city["lon"])
-    
 
+
+@app.get("/cities", response_model=List[CityOut])
+async def get_cities():
+    """Получает список всех городов из БД"""
+    query = "SELECT name, lat, lon FROM cities ORDER BY name ASC;"
+    cities = await db_fetchall(query)
+    return [CityOut(name=city["name"], lat=city["lat"], lon=city["lon"]) for city in cities]
 
 
 # ! запуск приложения
