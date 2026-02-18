@@ -1,5 +1,6 @@
 import asyncio
 from calendar import c
+from time import timezone
 import aiosqlite
 from contextlib import asynccontextmanager
 import datetime as dt
@@ -32,7 +33,7 @@ async def init_db():
         # создаем таблицу для хранения городов
         # * name - название города, lat - широта, lon - долгота
         await db.execute("""
-                        CREATE TABLE IF NOT EXIST cities(
+                        CREATE TABLE IF NOT EXISTS cities(
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
                             name TEXT NOT NULL,
                             lat REAL NOT NULL,
@@ -102,7 +103,11 @@ class CurrentWeatherOut(BaseModel):
     temp: Optional[float]
     wind_speed: Optional[float]
     pressure: Optional[float]
-    source_time: Optional[float]
+    source_time: Optional[str]
+    temp_unit: Optional[str]
+    wind_unit: Optional[str]
+    pressure_unit: Optional[str]
+    timezone: Optional[str]
 
 
 # * Запросы к OPEN-METEO
@@ -126,8 +131,21 @@ async def fetch_current_weather(lat: float, lon: float):
         data = response.json()
     
     current_weather = data.get("current", {})
-    print(data)
-    print(current_weather)
+    current_units = data.get("current_units", {})
+
+    result = {
+        "lat": lat,
+        "lon": lon,
+        "temp": current_weather.get("temperature_2m"),
+        "wind_speed": current_weather.get("wind_speed_10m"),
+        "pressure": current_weather.get("pressure_msl"),
+        "source_time": current_weather.get("time"),
+        "temp_unit": current_units.get("temperature_2m"),
+        "wind_unit": current_units.get("wind_speed_10m"),
+        "pressure_unit": current_units.get("pressure_msl"),
+        "timezone": data.get("timezone_abbreviation")
+    }
+    return result
 
 
 # * FAST API
@@ -158,18 +176,19 @@ async def get_current_weather(
     lat: float = Query(..., description="Широта"),
     lon: float = Query(..., description="Долгота")
 ):
-    """Получает текущую погоду по широте и долготе
-    Args:
-        lat (float): Широта
-        lon (float): Долгота
-    """
+    """Получает текущую погоду по широте и долготе"""
     if not (-90 <= lat <= 90):
         raise HTTPException(status_code=400, detail="Недопустимое значение широты. Должно быть от -90 до 90.")
     if not (-180 <= lon <= 180):
         raise HTTPException(status_code=400, detail="Недопустимое значение долготы. Должно быть от -180 до 180.")
     
     try:
-        await fetch_current_weather(lat, lon)
+        data = await fetch_current_weather(lat, lon)
+        return CurrentWeatherOut(**data)
     except httpx.HTTPError as e:
         raise HTTPException(status_code=502, detail=f"Ошибка при получении данных от внешнего API: {str(e)}")
 
+
+# ! запуск приложения
+if __name__ == "__main__":
+    uvi.run(app, host="127.0.0.1", port=8000, reload=False)
