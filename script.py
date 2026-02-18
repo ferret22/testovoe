@@ -1,3 +1,4 @@
+from ast import Add
 import asyncio
 from calendar import c
 from time import timezone
@@ -8,7 +9,7 @@ from typing import Optional, List, Dict, Any
 
 import httpx
 import uvicorn as uvi
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, params
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -35,7 +36,7 @@ async def init_db():
         await db.execute("""
                         CREATE TABLE IF NOT EXISTS cities(
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            name TEXT NOT NULL,
+                            name TEXT NOT NULL UNIQUE,
                             lat REAL NOT NULL,
                             lon REAL NOT NULL
                         );
@@ -95,6 +96,8 @@ async def db_executemany(query: str, seq_params: list[tuple]):
         await db.commit()
 
 
+
+
 # * pydantic models
 class CurrentWeatherOut(BaseModel):
     """Модель для вывода текущей погоды"""
@@ -108,6 +111,28 @@ class CurrentWeatherOut(BaseModel):
     wind_unit: Optional[str]
     pressure_unit: Optional[str]
     timezone: Optional[str]
+
+
+class AddCityIn(BaseModel):
+    """Модель для добавления города в БД"""
+    name: str = Field(..., min_length=1, max_length=100, description="Название города")
+    lat: float = Field(..., ge=-90, le=90, description="Широта города")
+    lon: float = Field(..., ge=-180, le=180, description="Долгота города")
+    
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value):
+        """Проверяет, что название города не состоит только из пробелов"""
+        if not value.strip():
+            raise ValueError("Название города не может быть пустым")
+        return value.strip()
+
+
+class CityOut(BaseModel):
+    """Модель для вывода информации о городе"""
+    name: str
+    lat: float
+    lon: float
 
 
 # * Запросы к OPEN-METEO
@@ -187,6 +212,23 @@ async def get_current_weather(
         return CurrentWeatherOut(**data)
     except httpx.HTTPError as e:
         raise HTTPException(status_code=502, detail=f"Ошибка при получении данных от внешнего API: {str(e)}")
+
+
+@app.post("/cities", response_model=CityOut, status_code=201)
+async def add_city(payload: AddCityIn):
+    """Сохраняет город в БД"""
+    query = "INSERT INTO cities(name, lat, lon) VALUES (?, ?, ?);"
+    params = (payload.name, payload.lat, payload.lon)
+    try:
+        await db_execute(query, params)
+    except aiosqlite.IntegrityError:
+        raise HTTPException(status_code=400, detail="Город с таким названием уже существует")
+    
+    query = "SELECT name, lat, lon FROM cities WHERE name = ?;"
+    city = await db_fetchone(query, (payload.name,))
+    return CityOut(name=city["name"], lat=city["lat"], lon=city["lon"])
+    
+
 
 
 # ! запуск приложения
