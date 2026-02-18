@@ -23,7 +23,7 @@ async def foreign_keys_on(db: aiosqlite.Connection):
 
 
 async def init_db():
-    """Подключение к БД"""
+    """Подключение к БД и создание таблиц, если их нет"""
     async with aiosqlite.connect(db_path) as db:
         # 
         await foreign_keys_on(db)
@@ -44,11 +44,10 @@ async def init_db():
 
 
 async def db_fetchone(query: str, params: tuple = ()) -> Optional[aiosqlite.Row]:
-    """
-    Возвращает одну запись из БД\n
-    query - Запрос на SQL\n
-    params - Параметры для запроса\n
-    Возвращает объект aiosqlite.Row, либо None, если запись не найдена
+    """Возвращает одну запись из БД по SQL запросу и параметрам
+    Args:
+        query (str): Запрос на SQL
+        params (tuple): Параметры для запроса
     """
     async with aiosqlite.connect(db_path) as db:
         db.row_factory = aiosqlite.Row
@@ -58,11 +57,10 @@ async def db_fetchone(query: str, params: tuple = ()) -> Optional[aiosqlite.Row]
 
 
 async def db_fetchall(query: str, params: tuple = ()) -> List[aiosqlite.Row]:
-    """
-    Возвращает несколько записей из БД\n
-    query - Запрос на SQL\n
-    params - Параметры для запроса\n
-    Возвращает объект List[aiosqlite.Row]
+    """Возвращает несколько записей из БД по SQL запросу и параметрам
+    Args:
+        query (str): Запрос на SQL
+        params (tuple): Параметры для запроса
     """
     async with aiosqlite.connect(db_path) as db:
         db.row_factory = aiosqlite.Row
@@ -72,10 +70,10 @@ async def db_fetchall(query: str, params: tuple = ()) -> List[aiosqlite.Row]:
 
 
 async def db_execute(query: str, params: tuple = ()):
-    """
-    Выполняет один SQL запрос в БД с одним набором параметров\n
-    query - Запрос на SQL\n
-    params - Параметры для запроса\n
+    """Выполняет один SQL запрос в БД с одним набором параметров
+    Args:
+        query (str): Запрос на SQL
+        params (tuple): Параметры для запроса
     """
     async with aiosqlite.connect(db_path) as db:
         await foreign_keys_on(db)
@@ -84,12 +82,35 @@ async def db_execute(query: str, params: tuple = ()):
 
 
 async def db_executemany(query: str, seq_params: list[tuple]):
-    """
-    Выполняет один и тот же SQL запрос в БД с разными параметрами\n
-    query - Запрос на SQL\n
-    params - Параметры для запроса\n
+    """Выполняет один и тот же SQL запрос в БД с разными параметрами (несколько раз)
+    Args:
+        query (str): Запрос на SQL
+        seq_params (list[tuple]): Параметры для запроса
     """
     async with aiosqlite.connect(db_path) as db:
         await foreign_keys_on(db)
         await db.executemany(query, seq_params)
         await db.commit()
+
+
+# * pydantic models
+class CurrentWeatherOut(BaseModel):
+    """Модель для вывода текущей погоды"""
+    lat: float
+    lon: float
+    temp: Optional[float]
+    wind_speed: Optional[float]
+    pressure: Optional[float]
+    source_time: Optional[float]
+
+
+# * Запросы к OPEN-METEO
+async def get_current_weather(lat: float, lon: float):
+    """Получает текущую погоду по широте и долготе
+
+    Args:
+        lat (float): Широта
+        lon (float): Долгота
+    """
+    pass
+    
