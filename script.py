@@ -1,4 +1,5 @@
 import asyncio
+from calendar import c
 import aiosqlite
 from contextlib import asynccontextmanager
 import datetime as dt
@@ -105,12 +106,46 @@ class CurrentWeatherOut(BaseModel):
 
 
 # * Запросы к OPEN-METEO
-async def get_current_weather(lat: float, lon: float):
+async def fetch_current_weather(lat: float, lon: float):
     """Получает текущую погоду по широте и долготе
 
     Args:
         lat (float): Широта
         lon (float): Долгота
     """
-    pass
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+        "current": "temperature_2m,wind_speed_10m,pressure_msl",
+        "timezone": "auto"
+    }
     
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        response = await client.get(base_url, params=params)
+        response.raise_for_status()
+        data = response.json()
+    
+    current_weather = data.get("current", {})
+    print(data)
+    print(current_weather)
+
+
+# * FAST API
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Контекстный менеджер для запуска и остановки приложения FastAPI. Инициализирует БД при запуске."""
+    await init_db()
+    
+    app.state.stop_event = asyncio.Event()
+    yield
+
+    app.state.stop_event.set()
+
+
+app = FastAPI(
+    title='Погодный API',
+    description='API получения погоды',
+    version='1.0.0',
+    lifespan=lifespan
+)
