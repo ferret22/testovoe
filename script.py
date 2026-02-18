@@ -149,3 +149,27 @@ app = FastAPI(
     version='1.0.0',
     lifespan=lifespan
 )
+
+
+# * endpoints
+
+@app.get("/weather/current", response_model=CurrentWeatherOut)
+async def get_current_weather(
+    lat: float = Query(..., description="Широта"),
+    lon: float = Query(..., description="Долгота")
+):
+    """Получает текущую погоду по широте и долготе
+    Args:
+        lat (float): Широта
+        lon (float): Долгота
+    """
+    if not (-90 <= lat <= 90):
+        raise HTTPException(status_code=400, detail="Недопустимое значение широты. Должно быть от -90 до 90.")
+    if not (-180 <= lon <= 180):
+        raise HTTPException(status_code=400, detail="Недопустимое значение долготы. Должно быть от -180 до 180.")
+    
+    try:
+        await fetch_current_weather(lat, lon)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"Ошибка при получении данных от внешнего API: {str(e)}")
+
