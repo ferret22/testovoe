@@ -12,6 +12,8 @@ from pydantic import BaseModel, Field, field_validator
 
 # ! Класс БД, чтобы все методы были рядом
 class DataBase:
+    """Класс для работы с базой данных SQLite. Содержит методы для инициализации БД и выполнения запросов."""
+    
     def __init__(self):
         self.__queries = {
             # ? name - название города, lat - широта, lon - долгота
@@ -118,12 +120,92 @@ class DataBase:
 
 
 
+# ! Класс запросов к Open-Meteo, чтобы все методы были рядом
+class OpenMeteoAPI:
+    """Класс для работы с API Open-Meteo"""
+    
+    async def fetch_hourly_today(self, lat: float, lon: float):
+        """Получает почасовой прогноз на текущий день по широте и долготе
+        
+        Args:
+            lat (float): Широта
+            lon (float): Долгота
+        """
+        today = dt.date.today().isoformat()
+        params = {
+            'latitude': lat,
+            'longitude': lon,
+            'hourly': "temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation",
+            'start_date': today,
+            'end_date': today,
+            'timezone': "auto"
+        }
+        
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.get(api_url, params=params)
+            response.raise_for_status()
+            data = response.json()
+        
+        hourly = data.get("hourly", {})
+        
+        result = {
+            "date": today,
+            "times": hourly.get("time", []),
+            "temps": hourly.get("temperature_2m", []),
+            "humidities": hourly.get("relative_humidity_2m", []),
+            "wind_speeds": hourly.get("wind_speed_10m", []),
+            "precipitations": hourly.get("precipitation", []),
+        }
+        return result
+    
+    async def fetch_current_weather(self, lat: float, lon: float):
+        """Получает текущую погоду по широте и долготе
+
+        Args:
+            lat (float): Широта
+            lon (float): Долгота
+        """
+        params = {
+            "latitude": lat,
+            "longitude": lon,
+            "current": "temperature_2m,wind_speed_10m,pressure_msl",
+            "timezone": "auto"
+        }
+        
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.get(api_url, params=params)
+            response.raise_for_status()
+            data = response.json()
+        
+        current_weather = data.get("current", {})
+        current_units = data.get("current_units", {})
+
+        result = {
+            "lat": lat,
+            "lon": lon,
+            "temp": current_weather.get("temperature_2m"),
+            "wind_speed": current_weather.get("wind_speed_10m"),
+            "pressure": current_weather.get("pressure_msl"),
+            "source_time": current_weather.get("time"),
+            "temp_unit": current_units.get("temperature_2m"),
+            "wind_unit": current_units.get("wind_speed_10m"),
+            "pressure_unit": current_units.get("pressure_msl"),
+            "timezone": data.get("timezone_abbreviation")
+        }
+        return result
+
 
 
 # * ПЕРЕМЕННЫЕ
 db_path = "weather.db"
 api_url = "https://api.open-meteo.com/v1/forecast"
-db = DataBase()  # ! Объект БД
+
+
+db = DataBase()
+"""Объект класса DataBase для работы с базой данных"""
+
+api_base = OpenMeteoAPI()
+"""Объект класса OpenMeteoAPI для работы с API Open-Meteo"""
 
 host_name = "127.0.0.1"
 host_port = 8000
@@ -168,77 +250,7 @@ class CityOut(BaseModel):
     lon: float
 
 
-# * Запросы к OPEN-METEO
-async def fetch_current_weather(lat: float, lon: float):
-    """Получает текущую погоду по широте и долготе
 
-    Args:
-        lat (float): Широта
-        lon (float): Долгота
-    """
-    params = {
-        "latitude": lat,
-        "longitude": lon,
-        "current": "temperature_2m,wind_speed_10m,pressure_msl",
-        "timezone": "auto"
-    }
-    
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        response = await client.get(api_url, params=params)
-        response.raise_for_status()
-        data = response.json()
-    
-    current_weather = data.get("current", {})
-    current_units = data.get("current_units", {})
-
-    result = {
-        "lat": lat,
-        "lon": lon,
-        "temp": current_weather.get("temperature_2m"),
-        "wind_speed": current_weather.get("wind_speed_10m"),
-        "pressure": current_weather.get("pressure_msl"),
-        "source_time": current_weather.get("time"),
-        "temp_unit": current_units.get("temperature_2m"),
-        "wind_unit": current_units.get("wind_speed_10m"),
-        "pressure_unit": current_units.get("pressure_msl"),
-        "timezone": data.get("timezone_abbreviation")
-    }
-    return result
-
-
-async def fetch_hourly_today(lat: float, lon: float):
-    """Получает почасовой прогноз на текущий день по широте и долготе
-    
-    Args:
-        lat (float): Широта
-        lon (float): Долгота
-    """
-    today = dt.date.today().isoformat()
-    params = {
-        'latitude': lat,
-        'longitude': lon,
-        'hourly': "temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation",
-        'start_date': today,
-        'end_date': today,
-        'timezone': "auto"
-    }
-    
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        response = await client.get(api_url, params=params)
-        response.raise_for_status()
-        data = response.json()
-    
-    hourly = data.get("hourly", {})
-    
-    result = {
-        "date": today,
-        "times": hourly.get("time", []),
-        "temps": hourly.get("temperature_2m", []),
-        "humidities": hourly.get("relative_humidity_2m", []),
-        "wind_speeds": hourly.get("wind_speed_10m", []),
-        "precipitations": hourly.get("precipitation", []),
-    }
-    return result
 
 
 
@@ -276,7 +288,7 @@ async def get_current_weather(
         raise HTTPException(status_code=400, detail="Недопустимое значение долготы. Должно быть от -180 до 180.")
     
     try:
-        data = await fetch_current_weather(lat, lon)
+        data = await api_base.fetch_current_weather(lat, lon)
         return CurrentWeatherOut(**data)
     except httpx.HTTPError as e:
         raise HTTPException(status_code=502, detail=f"Ошибка при получении данных от внешнего API: {str(e)}")
