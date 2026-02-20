@@ -195,6 +195,93 @@ class OpenMeteoAPI:
         return result
 
 
+# ! Класс ForecastUpdater
+class ForecastUpdater:
+    """Класс для обновления прогноза погоды в БД"""
+    
+    async def update_city_forecast(self, city_row: aiosqlite.Row):
+        """Обновляет прогноз погоды для одного города в БД
+        Args:
+            city_row (aiosqlite.Row): Строка из таблицы cities с данными города"""
+        payload = await api_base.fetch_hourly_today(city_row["lat"], city_row["lon"])
+        await self.upsert_forecast(city_row["id"], payload)
+    
+    
+    async def update_forecast_loop(self, stop_event: asyncio.Event):
+        """Бесконечный цикл для обновления прогноза погоды для всех городов в БД каждые 30 минут
+        
+        Args:
+            stop_event (asyncio.Event): Событие для остановки цикла
+        """
+
+        while not stop_event.is_set():
+            query = "SELECT * FROM cities ORDER BY name ASC"
+            try:
+                cities = await db.db_fetchall(query)
+                for city in cities:
+                    try:
+                        await self.update_city_forecast(city)
+                    except Exception as exp_city:
+                        print(f"Ошибка при обновлении прогноза для города {city['name']}: {exp_city}")
+            except Exception as exp:
+                print(f"Ошибка при получении списка городов: {exp}")
+            
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=update_timeout * 60)
+            except asyncio.TimeoutError:
+                continue  # таймаут истек, продолжаем цикл для обновления прогноза
+            
+    
+    async def upsert_forecast(self, city_id: int, payload: Dict[str, Any]):
+        """Вставляет или обновляет прогноз погоды для города в БД
+        
+        Args:
+            city_id (int): ID города в БД
+            payload (Dict[str, Any]): Данные прогноза погоды для вставки или обновления
+        """
+        
+        # удаляем старые данные для этого города
+        query = "DELETE FROM forecast_hourly WHERE city_id=? and date<>?"
+        await db.db_execute(query, (city_id, payload["date"]))
+        
+        updated_at = dt.datetime.now(dt.timezone.utc).isoformat(timespec='seconds')
+        
+        times = payload['times']
+        temps = payload['temps']
+        humidities = payload['humidities']
+        wind_speeds = payload['wind_speeds']
+        precipitations = payload['precipitations']
+        
+        n = min(len(times), len(temps), len(humidities), len(wind_speeds), len(precipitations))
+        rows = []
+        for i in range(n):
+            rows.append((
+                city_id,
+                payload["date"],
+                times[i],
+                temps[i],
+                humidities[i],
+                wind_speeds[i],
+                precipitations[i],
+                updated_at
+            ))
+        
+        query = """
+            INSERT INTO forecast_hourly(city_id, date, time, temp, humidity, wind_speed, precipitation, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(city_id, time) DO UPDATE SET
+                temp=excluded.temp,
+                humidity=excluded.humidity,
+                wind_speed=excluded.wind_speed,
+                precipitation=excluded.precipitation,
+                updated_at=excluded.updated_at
+        """
+        await db.db_executemany(query, rows)
+
+
+
+
+
 
 # * ПЕРЕМЕННЫЕ
 db_path = "weather.db"
@@ -209,6 +296,9 @@ api_base = OpenMeteoAPI()
 
 host_name = "127.0.0.1"
 host_port = 8000
+
+update_timeout = 15
+"""Время в минутах между обновлениями прогноза погоды для всех городов в БД"""
 
 
 
