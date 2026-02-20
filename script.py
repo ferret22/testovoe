@@ -125,6 +125,8 @@ db_path = "weather.db"
 api_url = "https://api.open-meteo.com/v1/forecast"
 db = DataBase()  # ! Объект БД
 
+host_name = "127.0.0.1"
+host_port = 8000
 
 
 
@@ -204,6 +206,43 @@ async def fetch_current_weather(lat: float, lon: float):
     return result
 
 
+async def fetch_hourly_today(lat: float, lon: float):
+    """Получает почасовой прогноз на текущий день по широте и долготе
+    
+    Args:
+        lat (float): Широта
+        lon (float): Долгота
+    """
+    today = dt.date.today().isoformat()
+    params = {
+        'latitude': lat,
+        'longitude': lon,
+        'hourly': "temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation",
+        'start_date': today,
+        'end_date': today,
+        'timezone': "auto"
+    }
+    
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        response = await client.get(api_url, params=params)
+        response.raise_for_status()
+        data = response.json()
+    
+    hourly = data.get("hourly", {})
+    
+    result = {
+        "date": today,
+        "times": hourly.get("time", []),
+        "temps": hourly.get("temperature_2m", []),
+        "humidities": hourly.get("relative_humidity_2m", []),
+        "wind_speeds": hourly.get("wind_speed_10m", []),
+        "precipitations": hourly.get("precipitation", []),
+    }
+    return result
+
+
+
+
 # * FAST API
 
 @asynccontextmanager
@@ -268,4 +307,4 @@ async def get_cities():
 
 # ! запуск приложения
 if __name__ == "__main__":
-    uvi.run(app, host="127.0.0.1", port=8000, reload=False)
+    uvi.run(app, host=host_name, port=host_port, reload=False)
