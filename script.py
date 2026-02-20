@@ -13,87 +13,86 @@ from fastapi import FastAPI, HTTPException, Query, params
 from pydantic import BaseModel, Field, field_validator
 
 
+# ! Класс БД, чтобы все методы были рядом
+class DataBase:
+    async def foreign_keys_on(self, db: aiosqlite.Connection):
+        """Включение поддержки внешних ключей"""
+        await db.execute("PRAGMA foreign_keys = ON;")
+
+    # * подключение к БД
+    async def init_db(self):
+        """Подключение к БД и создание таблиц, если их нет"""
+        async with aiosqlite.connect(db_path) as database:
+            await self.foreign_keys_on(database)
+            
+            # создаем таблицу для хранения городов
+            # * name - название города, lat - широта, lon - долгота
+            await database.execute("""
+                            CREATE TABLE IF NOT EXISTS cities(
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                name TEXT NOT NULL UNIQUE,
+                                lat REAL NOT NULL,
+                                lon REAL NOT NULL
+                            );
+                            """)
+            
+            await database.commit()
+
+    async def db_fetchone(self, query: str, params: tuple = ()) -> Optional[aiosqlite.Row]:
+        """Возвращает одну запись из БД по SQL запросу и параметрам
+        Args:
+            query (str): Запрос на SQL
+            params (tuple): Параметры для запроса
+        """
+        async with aiosqlite.connect(db_path) as database:
+            database.row_factory = aiosqlite.Row
+            await self.foreign_keys_on(database)
+            async with database.execute(query, params) as cur:
+                return await cur.fetchone()
+
+    async def db_fetchall(self, query: str, params: tuple = ()) -> List[aiosqlite.Row]:
+        """Возвращает несколько записей из БД по SQL запросу и параметрам
+        Args:
+            query (str): Запрос на SQL
+            params (tuple): Параметры для запроса
+        """
+        async with aiosqlite.connect(db_path) as database:
+            database.row_factory = aiosqlite.Row
+            await self.foreign_keys_on(database)
+            async with database.execute(query, params) as cur:
+                return await cur.fetchall()
+
+    async def db_execute(self, query: str, params: tuple = ()):
+        """Выполняет один SQL запрос в БД с одним набором параметров
+        Args:
+            query (str): Запрос на SQL
+            params (tuple): Параметры для запроса
+        """
+        async with aiosqlite.connect(db_path) as database:
+            await self.foreign_keys_on(database)
+            await database.execute(query, params)
+            await database.commit()
+
+    async def db_executemany(self, query: str, seq_params: list[tuple]):
+        """Выполняет один и тот же SQL запрос в БД с разными параметрами (несколько раз)
+        Args:
+            query (str): Запрос на SQL
+            seq_params (list[tuple]): Параметры для запроса
+        """
+        async with aiosqlite.connect(db_path) as database:
+            await self.foreign_keys_on(database)
+            await database.executemany(query, seq_params)
+            await database.commit()
+
+
+
+
+
 # * ПЕРЕМЕННЫЕ
 db_path = "weather.db"
-base_url = "https://api.open-meteo.com/v1/forecast"
+api_url = "https://api.open-meteo.com/v1/forecast"
+db = DataBase()  # ! Объект БД
 
-
-# * подключение к БД
-
-async def foreign_keys_on(db: aiosqlite.Connection):
-    """Включение поддержки внешних ключей"""
-    await db.execute("PRAGMA foreign_keys = ON;")
-
-
-async def init_db():
-    """Подключение к БД и создание таблиц, если их нет"""
-    async with aiosqlite.connect(db_path) as db:
-        # 
-        await foreign_keys_on(db)
-        
-        # создаем таблицу для хранения городов
-        # * name - название города, lat - широта, lon - долгота
-        await db.execute("""
-                        CREATE TABLE IF NOT EXISTS cities(
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            name TEXT NOT NULL UNIQUE,
-                            lat REAL NOT NULL,
-                            lon REAL NOT NULL
-                        );
-                        """)
-        
-        
-        await db.commit()
-
-
-async def db_fetchone(query: str, params: tuple = ()) -> Optional[aiosqlite.Row]:
-    """Возвращает одну запись из БД по SQL запросу и параметрам
-    Args:
-        query (str): Запрос на SQL
-        params (tuple): Параметры для запроса
-    """
-    async with aiosqlite.connect(db_path) as db:
-        db.row_factory = aiosqlite.Row
-        await foreign_keys_on(db)
-        async with db.execute(query, params) as cur:
-            return await cur.fetchone()
-
-
-async def db_fetchall(query: str, params: tuple = ()) -> List[aiosqlite.Row]:
-    """Возвращает несколько записей из БД по SQL запросу и параметрам
-    Args:
-        query (str): Запрос на SQL
-        params (tuple): Параметры для запроса
-    """
-    async with aiosqlite.connect(db_path) as db:
-        db.row_factory = aiosqlite.Row
-        await foreign_keys_on(db)
-        async with db.execute(query, params) as cur:
-            return await cur.fetchall()
-
-
-async def db_execute(query: str, params: tuple = ()):
-    """Выполняет один SQL запрос в БД с одним набором параметров
-    Args:
-        query (str): Запрос на SQL
-        params (tuple): Параметры для запроса
-    """
-    async with aiosqlite.connect(db_path) as db:
-        await foreign_keys_on(db)
-        await db.execute(query, params)
-        await db.commit()
-
-
-async def db_executemany(query: str, seq_params: list[tuple]):
-    """Выполняет один и тот же SQL запрос в БД с разными параметрами (несколько раз)
-    Args:
-        query (str): Запрос на SQL
-        seq_params (list[tuple]): Параметры для запроса
-    """
-    async with aiosqlite.connect(db_path) as db:
-        await foreign_keys_on(db)
-        await db.executemany(query, seq_params)
-        await db.commit()
 
 
 
@@ -151,7 +150,7 @@ async def fetch_current_weather(lat: float, lon: float):
     }
     
     async with httpx.AsyncClient(timeout=20.0) as client:
-        response = await client.get(base_url, params=params)
+        response = await client.get(api_url, params=params)
         response.raise_for_status()
         data = response.json()
     
@@ -178,7 +177,7 @@ async def fetch_current_weather(lat: float, lon: float):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Контекстный менеджер для запуска и остановки приложения FastAPI. Инициализирует БД при запуске."""
-    await init_db()
+    await db.init_db()
     
     app.state.stop_event = asyncio.Event()
     yield
@@ -194,13 +193,11 @@ app = FastAPI(
 )
 
 
-# * endpoints
+# * ENDPOINTS
 
 @app.get("/weather/current", response_model=CurrentWeatherOut)
 async def get_current_weather(
-    lat: float = Query(..., description="Широта"),
-    lon: float = Query(..., description="Долгота")
-):
+    lat: float = Query(..., description="Широта"), lon: float = Query(..., description="Долгота")):
     """Получает текущую погоду по широте и долготе"""
     if not (-90 <= lat <= 90):
         raise HTTPException(status_code=400, detail="Недопустимое значение широты. Должно быть от -90 до 90.")
@@ -220,12 +217,12 @@ async def add_city(payload: AddCityIn):
     query = "INSERT INTO cities(name, lat, lon) VALUES (?, ?, ?);"
     params = (payload.name, payload.lat, payload.lon)
     try:
-        await db_execute(query, params)
+        await db.db_execute(query, params)
     except aiosqlite.IntegrityError:
         raise HTTPException(status_code=400, detail="Город с таким названием уже существует")
     
     query = "SELECT name, lat, lon FROM cities WHERE name = ?;"
-    city = await db_fetchone(query, (payload.name,))
+    city = await db.db_fetchone(query, (payload.name,))
     return CityOut(name=city["name"], lat=city["lat"], lon=city["lon"])
 
 
@@ -233,7 +230,7 @@ async def add_city(payload: AddCityIn):
 async def get_cities():
     """Получает список всех городов из БД"""
     query = "SELECT name, lat, lon FROM cities ORDER BY name ASC;"
-    cities = await db_fetchall(query)
+    cities = await db.db_fetchall(query)
     return [CityOut(name=city["name"], lat=city["lat"], lon=city["lon"]) for city in cities]
 
 
