@@ -1,7 +1,4 @@
-from ast import Add
 import asyncio
-from calendar import c
-from time import timezone
 import aiosqlite
 from contextlib import asynccontextmanager
 import datetime as dt
@@ -15,6 +12,43 @@ from pydantic import BaseModel, Field, field_validator
 
 # ! Класс БД, чтобы все методы были рядом
 class DataBase:
+    def __init__(self):
+        self.__queries = {
+            # ? name - название города, lat - широта, lon - долгота
+            "cities":   """
+                            CREATE TABLE IF NOT EXISTS cities(
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                name TEXT NOT NULL UNIQUE,
+                                lat REAL NOT NULL,
+                                lon REAL NOT NULL
+                            );
+                        """,
+                        
+            # ? city_id - ID города, date - Дата, time - время, temp - температура, 
+            # ? wind_speed - скорость ветра, precipitation - кол-во осадков (мм),
+            # ? update_at - время обновления
+            "forecast": """
+                        CREATE TABLE IF NOT EXISTS forecast_hourly(
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                city_id INTEGER NOT NULL,
+                                date TEXT NOT NULL,
+                                time TEXT NOT NULL,
+                                temp REAL,
+                                wind_speed REAL,
+                                precipitation REAL,
+                                updated_at TEXT NOT NULL,
+                                UNIQUE(city_id, time),
+                                FOREIGN KEY(city_id) REFERENCES cities(id) ON DELETE CASCADE
+                            );
+                        """,
+                        
+            # ? Индексация (для ускорения поиска)
+            "index":    """
+                        CREATE INDEX IF NOT EXISTS idx_forecast ON forecast_hourly(city_id, date, time)
+                        """
+        }
+        
+    
     async def foreign_keys_on(self, db: aiosqlite.Connection):
         """Включение поддержки внешних ключей"""
         await db.execute("PRAGMA foreign_keys = ON;")
@@ -26,16 +60,14 @@ class DataBase:
             await self.foreign_keys_on(database)
             
             # создаем таблицу для хранения городов
-            # * name - название города, lat - широта, lon - долгота
-            await database.execute("""
-                            CREATE TABLE IF NOT EXISTS cities(
-                                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                name TEXT NOT NULL UNIQUE,
-                                lat REAL NOT NULL,
-                                lon REAL NOT NULL
-                            );
-                            """)
+            await database.execute(self.__queries["cities"])
             
+            # создаем таблицу для каждодневных прогнозов погоды
+            await database.execute(self.__queries["forecast"])
+            
+            # создаем индексы для ускорения поиска
+            await database.execute(self.__queries["index"])
+
             await database.commit()
 
     async def db_fetchone(self, query: str, params: tuple = ()) -> Optional[aiosqlite.Row]:
