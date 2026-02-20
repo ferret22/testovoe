@@ -36,6 +36,7 @@ class DataBase:
                                 date TEXT NOT NULL,
                                 time TEXT NOT NULL,
                                 temp REAL,
+                                humidity REAL,
                                 wind_speed REAL,
                                 precipitation REAL,
                                 updated_at TEXT NOT NULL,
@@ -294,6 +295,9 @@ db = DataBase()
 api_base = OpenMeteoAPI()
 """Объект класса OpenMeteoAPI для работы с API Open-Meteo"""
 
+forecast = ForecastUpdater()
+"""Объект класса ForecastUpdater для обновления прогноза погоды в БД"""
+
 host_name = "127.0.0.1"
 host_port = 8000
 
@@ -353,9 +357,11 @@ async def lifespan(app: FastAPI):
     await db.init_db()
     
     app.state.stop_event = asyncio.Event()
+    app.state.bg_task = asyncio.create_task(forecast.update_forecast_loop(app.state.stop_event))
     yield
 
     app.state.stop_event.set()
+    await app.state.bg_task
 
 
 app = FastAPI(
