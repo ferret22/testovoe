@@ -1,4 +1,5 @@
 import asyncio
+from urllib import request
 import aiosqlite
 from contextlib import asynccontextmanager
 import datetime as dt
@@ -230,6 +231,7 @@ class ForecastUpdater:
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=update_timeout * 60)
             except asyncio.TimeoutError:
+                print(f"Прогноз погоды обновлен для всех городов. Следующее обновление через {update_timeout} минут.")
                 continue  # таймаут истек, продолжаем цикл для обновления прогноза
             
     
@@ -303,6 +305,9 @@ host_port = 8000
 
 update_timeout = 15
 """Время в минутах между обновлениями прогноза погоды для всех городов в БД"""
+
+allowed_fields = {"temp", "humidity", "wind_speed", "precipitation"}
+"""Разрешенные поля для получения прогноза погоды в эндпоинте get_city_forecast"""
 
 
 
@@ -411,6 +416,65 @@ async def get_cities():
     query = "SELECT name, lat, lon FROM cities ORDER BY name ASC;"
     cities = await db.db_fetchall(query)
     return [CityOut(name=city["name"], lat=city["lat"], lon=city["lon"]) for city in cities]
+
+
+@app.get("/weather/forecast")
+async def get_city_forecast(city: str = Query(..., min_length=1, max_length=100, description="Название города"),
+                            time: str = Query(..., description="Время в формате HH:MM (например 14:00)"),
+                            fields: Optional[str] = Query(
+                                None, description="Поля через запятую: temp,humidity,wind_speed,precipitation")):
+    """Получает прогноз погоды для города по времени"""
+    # проверяем, что название города не пустое и не состоит только из пробелов
+    city_name = city.strip()
+    if not city_name:
+        raise HTTPException(status_code=400, detail="Название города не может быть пустым")
+    
+    # проверяем формат времени
+    try:
+        date = dt.datetime.strptime(time, "%H:%M")
+        hour = date.strftime("%H")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Неверный формат времени. Должно быть HH:MM (например 14:00)")
+    
+    # проверяем, что поля валидны
+    if fields:
+        requested_fields = {field.strip() for field in fields.split(",") if field.strip()}
+        unknown_fields = requested_fields - allowed_fields
+        if unknown_fields:
+            raise HTTPException(status_code=400, detail=f"Недопустимые поля: {', '.join(unknown_fields)}. "
+                                                        f"Допустимые поля: {', '.join(allowed_fields)}")
+    else:
+        requested_fields = allowed_fields
+    
+    # проверяем, что город есть в БД
+    query = "SELECT id FROM cities WHERE name = ?;"
+    city_row = await db.db_fetchone(query, (city_name,))
+    if not city_row:
+        raise HTTPException(status_code=404, detail="Город не найден в базе данных")
+    
+    # получаем прогноз погоды для города по времени
+    today = dt.date.today().isoformat()
+    hour_prefix = f"{today}T{hour}"
+    query = """
+        SELECT time, temp, humidity, wind_speed, precipitation
+        FROM forecast_hourly
+        WHERE city_id=? AND date=? AND time LIKE ?
+        LIMIT 1;
+    """
+    forecast_row = await db.db_fetchone(query, (city_row["id"], today, f"{hour_prefix}%"))
+    if not forecast_row:
+        raise HTTPException(status_code=404, detail="Прогноз погоды для этого города и времени не найден")
+    
+    # формируем результат с запрошенными полями
+    weather = {key: forecast_row[key] for key in sorted(requested_fields)}
+    result = {
+        "city": city_name,
+        "date": today,
+        "time": forecast_row["time"],
+        "weather": weather
+    }
+    
+    return result
 
 
 # ! запуск приложения
