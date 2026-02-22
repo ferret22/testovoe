@@ -1,4 +1,5 @@
 import asyncio
+from enum import Enum
 from urllib import request
 import aiosqlite
 from contextlib import asynccontextmanager
@@ -349,8 +350,20 @@ class CityOut(BaseModel):
     lon: float
 
 
+class ForecastField(str, Enum):
+    """Перечисление для полей прогноза погоды"""
+    temp = "temp"
+    humidity = "humidity"
+    wind_speed = "wind_speed"
+    precipitation = "precipitation"
 
 
+class ForecastOut(BaseModel):
+    """Модель для вывода прогноза погоды для города по времени"""
+    city: str
+    date: str
+    time: str
+    weather: Dict[ForecastField, float | None]
 
 
 
@@ -418,7 +431,7 @@ async def get_cities():
     return [CityOut(name=city["name"], lat=city["lat"], lon=city["lon"]) for city in cities]
 
 
-@app.get("/weather/forecast")
+@app.get("/weather/forecast", response_model=ForecastOut)
 async def get_city_forecast(city: str = Query(..., min_length=1, max_length=100, description="Название города"),
                             time: str = Query(..., description="Время в формате HH:MM (например 14:00)"),
                             fields: Optional[str] = Query(
@@ -474,7 +487,7 @@ async def get_city_forecast(city: str = Query(..., min_length=1, max_length=100,
         "weather": weather
     }
     
-    return result
+    return ForecastOut(**result)
 
 
 # ! запуск приложения
